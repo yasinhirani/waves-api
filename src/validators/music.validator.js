@@ -23,3 +23,29 @@ export const artistQuery = z.object({
   category: z.string().trim().max(30).default(''),
   sortOrder: z.string().trim().max(10).default('')
 });
+
+export const podcastQuery = z.object({
+  season: z.coerce.number().int().min(1).max(100).default(1),
+  sortOrder: z.enum(['asc', 'desc', '']).default('')
+});
+
+export const showIdParams = z.object({ showId: z.string().trim().regex(/^\d{1,12}$/, 'showId must be the numeric show id') });
+
+export const podcastEpisodesQuery = z.object({
+  season: z.coerce.number().int().min(1).max(100).default(1),
+  sortOrder: z.enum(['asc', 'desc']).default('desc'),
+  page: z.coerce.number().int().min(1).max(500).default(1)
+});
+
+export const radioStationQuery = z.object({
+  name: z.string().trim().min(1).max(150),
+  language: z.string().trim().max(30).default('hindi')
+});
+
+export const radioStationIdParams = z.object({
+  stationId: z.string().trim().min(3).max(300).regex(/^[\w,-]+$/, 'Invalid station id')
+});
+
+export const radioSongsQuery = z.object({
+  count: z.coerce.number().int().min(1).max(50).default(20)
+});

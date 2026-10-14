@@ -43,10 +43,12 @@ const parseBody = (data) => {
   }
 };
 
-async function call(params) {
+async function call(params, { cache: shouldCache = true } = {}) {
   const cacheKey = JSON.stringify(params);
-  const hit = cache.get(cacheKey);
-  if (hit !== undefined) return hit;
+  if (shouldCache) {
+    const hit = cache.get(cacheKey);
+    if (hit !== undefined) return hit;
+  }
 
   let lastError;
   for (let attempt = 0; attempt <= env.MAX_RETRIES; attempt++) {
@@ -59,10 +61,12 @@ async function call(params) {
       }
 
       const result = transform(data);
-      try {
-        cache.set(cacheKey, result);
-      } catch (e) {
-        logger.warn({ err: e }, 'Cache set failed');
+      if (shouldCache) {
+        try {
+          cache.set(cacheKey, result);
+        } catch (e) {
+          logger.warn({ err: e }, 'Cache set failed');
+        }
       }
       return result;
     } catch (err) {
@@ -104,6 +108,57 @@ export const getArtist = (token, q) =>
     category: q.category,
     sort_order: q.sortOrder
   });
+
+// Podcast ("show") details: show info + seasons + episodes (each episode gets downloadUrl[] like songs)
+export const getShow = (token, { season, sortOrder }) =>
+  detail('show', token, { season_number: season, sort_order: sortOrder });
+
+// More episodes of a show (the show details call only returns the first page).
+// The response shape isn't documented: accept a bare array or an object wrapping the list.
+const extractEpisodes = (data) => {
+  if (Array.isArray(data)) return data;
+  for (const key of ['episodes', 'list', 'results', 'data']) if (Array.isArray(data?.[key])) return data[key];
+  return [];
+};
+
+/** showId is the numeric id (show_details.id), NOT the url token. */
+export const getShowEpisodes = async (showId, { season, sortOrder, page }) => {
+  const data = await call({
+    __call: 'show.getAllEpisodes',
+    show_id: showId,
+    season_number: season,
+    sort_order: sortOrder,
+    p: page
+  });
+  return { page, episodes: extractEpisodes(data) };
+};
+
+// Radio: create a featured station by name, then fetch a batch of (effectively random) songs for it.
+// The "next songs" call must never be cached, or the radio would just repeat the same batch forever.
+const createRadioStation = (name, language) =>
+  call({ __call: 'webradio.createFeaturedStation', name, language, pid: '', query: '', mode: '', artistid: '' }).then(
+    (d) => d.stationid
+  );
+
+const extractStationSongs = (data) =>
+  Object.entries(data ?? {})
+    .filter(([key, value]) => key !== 'stationid' && value?.song)
+    .map(([, value]) => value.song);
+
+const getStationSongs = (stationId, count) =>
+  call({ __call: 'webradio.getSong', stationid: stationId, k: count, next: 1 }, { cache: false }).then(
+    extractStationSongs
+  );
+
+/** One call for the frontend: creates the station and returns its id plus the first batch of songs. */
+export const startRadioStation = async (name, language) => {
+  const stationId = await createRadioStation(name, language);
+  const songs = await getStationSongs(stationId, 20);
+  return { stationId, songs };
+};
+
+/** Called again by the player once the queued songs for a station run low. */
+export const getMoreRadioSongs = (stationId, count) => getStationSongs(stationId, count);
 
 export const searchSongs = (q) => search('search.getResults', q);
 export const searchAlbums = (q) => search('search.getAlbumResults', q);
